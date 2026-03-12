@@ -1,0 +1,152 @@
+services:
+## PostgreSQL
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    volumes:
+      - ./mnt/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: "admin"
+      POSTGRES_USER: "admin"
+      POSTGRES_PASSWORD: "admin"
+    ports:
+      - "5436:5432"
+
+
+
+## MinIO Object Storage
+  minio:
+    container_name: minio
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z  # ii
+    volumes:
+      - ./mnt/minio:/data  # Named volume for persistent MinIO data
+    ports:
+      - "9000:9000"   # Expose MinIO server port
+      - "9001:9001"   # Expose MinIO console port
+    environment:
+      MINIO_ROOT_USER: minioadmin  # Set desired access key
+      MINIO_ROOT_PASSWORD: minioadmin  # Set desired secret key
+      AWS_REGION: us-east-1
+    entrypoint: >
+      /bin/sh -c "
+      minio server /data --console-address ':9001' &
+      sleep 5;
+      mc alias set minio http://minio:9000 minioadmin minioadmin;
+      mc mb minio/data --ignore-existing;
+      mc mb minio/iceberg-warehouse --ignore-existing;
+      mc mb minio/warehouse --ignore-existing;
+      tail -f /dev/null"
+    restart: on-failure  # Restart the container if it fails
+
+
+## Trino
+  trino:
+    image: amhhaggag/trino-450:1.1
+    restart: on-failure
+    container_name: trino
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mnt/trino/etc:/opt/trino/etc
+      - ./sql_tmp:/sql 
+    environment:
+      - TRINO_VERSION=450
+    entrypoint: ["/opt/trino/bin/entrypoint.sh"]
+
+
+
+
+
+## Nessie Catalog for Iceberg Tables
+  nessie-init:
+    image: postgres:14
+    depends_on:
+      - postgres
+    command: >
+      bash -c """
+      until pg_isready -h postgres -p 5432; do sleep 2; done;
+      psql -h postgres -U admin -d admin -c 'CREATE DATABASE nessie;';
+      psql -h postgres -U admin -d admin -c \"DO \\$\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'nessie') THEN CREATE USER nessie WITH PASSWORD 'nessie'; END IF; END \\$\\$;\";
+      psql -h postgres -U admin -d admin -c 'GRANT ALL PRIVILEGES ON DATABASE nessie TO nessie;'
+      """
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      PGPASSWORD: admin
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.99.0
+    container_name: nessie
+    environment:
+      - QUARKUS_PROFILE=prod
+      - QUARKUS_HTTP_PORT=19120
+      - QUARKUS_LOG_CONSOLE_FORMAT=%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{1.}] (%t) %s%e%n
+      - QUARKUS_LOG_LEVEL=DEBUG
+      # Version store settings.
+      # This example uses Postgres as the version store.
+      - nessie.version.store.type=JDBC
+      - nessie.version.store.persist.jdbc.datasource=postgresql
+      - quarkus.datasource.postgresql.jdbc.url=jdbc:postgresql://postgres:5432/nessie
+      - quarkus.datasource.postgresql.username=nessie
+      - quarkus.datasource.postgresql.password=nessie
+      # AuthN settings.
+      # This examples uses Keycloak for authentication.
+      - nessie.server.authentication.enabled=false
+        #- quarkus.oidc.auth-server-url=http://keycloak:8080/realms/iceberg
+        #- quarkus.oidc.client-id=client1
+        #- quarkus.oidc.token.issuer=http://keycloak:8080/realms/iceberg
+      # Object store settings.
+      # This example uses MinIO as the object store.
+      - nessie.catalog.default-warehouse=warehouse
+      - nessie.catalog.warehouses.warehouse.location=s3://warehouse/
+      - nessie.catalog.service.s3.default-options.region=us-east-1
+      - nessie.catalog.service.s3.default-options.path-style-access=true
+      - nessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:nessie.catalog.secrets.access-key
+      - nessie.catalog.secrets.access-key.name=minioadmin
+      - nessie.catalog.secrets.access-key.secret=minioadmin
+      # MinIO endpoint
+      - nessie.catalog.service.s3.default-options.endpoint=http://minio:9000/
+    volumes:
+      - ./mnt/nessie-data:/nessie/data  # Mount local directory to persist RocksDB data
+    ports:
+      - "19120:19120"  # Expose Nessie API port
+    depends_on:
+      - nessie-init
+      - postgres
+
+
+
+
+
+
+## Dremio
+  dremio:
+    image: dremio/dremio-oss:24.3
+    container_name: dremio
+    ports:
+      - "9047:9047"
+      - "31010:31010"
+      - "45678:45678"
+    volumes:
+      - dremio_data:/opt/dremio/data
+      
+    environment:
+      DREMIO_MAX_HEAP: 2G
+    depends_on:
+      - minio
+      - nessie
+    restart: on-failure  
+
+
+
+
+volumes:
+  pg_data: {}
+  sql: {}
+  sql_tmp: {}
+  nessie_data: {}
+  dremio_data: {}
+  
+ 
+networks:
+  default:
