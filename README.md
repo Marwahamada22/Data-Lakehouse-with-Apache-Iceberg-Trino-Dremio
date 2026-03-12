@@ -1,5 +1,8 @@
 # 🏗️ Data Lakehouse with Apache Iceberg, Trino & Dremio
 
+<img width="649" height="301" alt="image" src="https://github.com/user-attachments/assets/5ea9c6f0-c8e3-47b7-b919-dd30151a3b9b" />
+
+
 A fully containerized Data Lakehouse built on the **Medallion Architecture** (Bronze → Silver → Gold) using Apache Iceberg as the table format, Nessie as the catalog, MinIO as object storage, and Trino , Dremio as the query engine.
 
 ---
