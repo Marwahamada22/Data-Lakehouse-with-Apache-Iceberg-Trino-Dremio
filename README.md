@@ -271,6 +271,5 @@ FOR VERSION AS OF <snapshot_id>;
 | Nessie API | http://localhost:19120 | - |
 | Dremio UI | http://localhost:9047 | admin account |
 
----
 
 |
