@@ -273,10 +273,4 @@ FOR VERSION AS OF <snapshot_id>;
 
 ---
 
-## ⚠️ Known Issues
-
-| Issue | Status | Workaround |
-|-------|--------|------------|
-| Trino config file permissions (root-owned) | ✅ Resolved | Use temporary Ubuntu container with root access |
-| Trino CLI not in custom image | ✅ Resolved | Download JAR on host machine |
-| Dremio S3 timeout when querying Iceberg tables | ⏳ In Progress | Set `dremio.s3.compat=true` + disable SSL |
+|
